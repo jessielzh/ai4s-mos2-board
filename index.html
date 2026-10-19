@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MoS₂ Growth Loop</title>
+<style>
+:root {
+  color-scheme: light;
+  --bg: #fcfcfb; --card: #ffffff; --ink: #0b0b0b; --ink2: #52514e; --muted: #7a7974;
+  --line: #e6e5e0; --grid: #efeee9; --series: #2a78d6;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #1a1a19; --card: #222221; --ink: #f0efec; --ink2: #c3c2b7; --muted: #9a998f;
+    --line: #3a3a37; --grid: #2c2c2a; --series: #3987e5;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #1a1a19; --card: #222221; --ink: #f0efec; --ink2: #c3c2b7; --muted: #9a998f;
+  --line: #3a3a37; --grid: #2c2c2a; --series: #3987e5;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 15px/1.55 -apple-system, "Helvetica Neue", "Segoe UI", sans-serif; }
+main { max-width: 760px; margin: 0 auto; padding: 28px 16px 48px; }
+.eyebrow { margin: 0; font-size: 12px; color: var(--muted); letter-spacing: .02em; }
+h1 { font-size: 26px; margin: 2px 0 2px; }
+.muted { margin: 2px 0 0; font-size: 13px; color: var(--muted); }
+section { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 18px 16px; margin: 16px 0; }
+.head { display: flex; flex-wrap: wrap; gap: 8px 32px; align-items: baseline; }
+.big { font-size: 40px; font-weight: 600; margin: 0; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.big small { font-size: 15px; font-weight: 400; color: var(--ink2); }
+.mid { font-size: 22px; font-weight: 600; margin: 0; font-variant-numeric: tabular-nums; }
+.mid small { font-size: 13px; font-weight: 400; color: var(--ink2); }
+svg { width: 100%; height: auto; display: block; margin-top: 14px; }
+.grid { stroke: var(--grid); stroke-width: 1; }
+.tick { fill: var(--muted); font-size: 11px; }
+.series { fill: none; stroke: var(--series); stroke-width: 2; stroke-linejoin: round; }
+.dot { fill: var(--series); stroke: var(--card); stroke-width: 2; }
+.hit { fill: transparent; cursor: pointer; }
+.dlabel { fill: var(--ink); font-size: 12px; font-weight: 600; }
+details { margin-top: 12px; font-size: 13px; }
+summary { cursor: pointer; color: var(--ink2); }
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; font-variant-numeric: tabular-nums; margin-top: 8px; }
+th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { color: var(--muted); font-weight: 500; }
+td.note { white-space: normal; color: var(--ink2); }
+#tip { position: fixed; pointer-events: none; background: var(--card); color: var(--ink); border: 1px solid var(--line);
+  border-radius: 8px; padding: 8px 10px; font-size: 12px; box-shadow: 0 4px 16px rgba(0,0,0,.12); display: none; }
+#tip b { font-size: 14px; }
+</style>
+</head>
+<body>
+<main>
+  <p class="eyebrow">AI4S · MoS₂ CVD growth · two-zone temperature program</p>
+  <h1>MoS₂ Growth Loop</h1>
+  <p class="muted" id="sub">Loading…</p>
+
+  <section>
+    <p class="eyebrow" id="mname"></p>
+    <div class="head">
+      <div><p class="big" id="latest">—</p><p class="muted" id="latestwhen"></p></div>
+      <div><p class="mid" id="best">—</p><p class="muted">best so far</p></div>
+      <div><p class="mid" id="target">—</p><p class="muted">target</p></div>
+    </div>
+    <div id="chart"></div>
+    <p class="muted" id="mdef"></p>
+    <details>
+      <summary>All runs</summary>
+      <div class="scroll"><table>
+        <thead><tr><th>Date</th><th>Run</th><th id="vhead">Value</th><th>Metric</th><th>Note</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table></div>
+    </details>
+  </section>
+  <p class="muted">One number per run. Everything else is discussed in the weekly meeting.</p>
+</main>
+<div id="tip"></div>
+
+<script>
+// The metric shown on this board. Changed only after the weekly meeting agrees;
+// bump `version`, and recompute old runs under the new definition in data.csv.
+const METRIC = {
+  version: "v0",
+  name: "Largest continuous monolayer",
+  unit: "µm",
+  target: 1000,
+  definition: "Longest lateral extent of one continuous monolayer region (stitched domains allowed), measured on a 5× overview that includes the film edge. Provisional — to be agreed with the lab.",
+};
+
+function parseCSV(text) {
+  const lines = text.trim().split(/\r?\n/).filter(l => l.trim());
+  const head = lines.shift().split(",").map(s => s.trim());
+  return lines.map(line => {
+    // simple CSV: the last column (note) may contain commas or quotes
+    const cells = line.split(",");
+    const row = {};
+    head.forEach((h, i) => row[h] = (i === head.length - 1 ? cells.slice(i).join(",") : cells[i] || "").trim().replace(/^"|"$/g, ""));
+    return row;
+  });
+}
+
+const fmt = v => v == null ? "—" : v.toLocaleString("en-US", { maximumFractionDigits: v < 10 ? 2 : 0 });
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+function render(all) {
+  const rows = all.filter(r => r.date).map(r => ({ ...r, v: r.value === "" ? null : Number(r.value), d: new Date(r.date + "T00:00:00") }))
+                  .sort((a, b) => a.d - b.d);
+  const cur = rows.filter(r => r.metric_version === METRIC.version && r.v != null && !isNaN(r.v));
+
+  document.getElementById("mname").textContent = `${METRIC.name} (${METRIC.unit}) · metric ${METRIC.version}`;
+  document.getElementById("mdef").textContent = METRIC.definition;
+  document.getElementById("vhead").textContent = `${METRIC.unit}`;
+  document.getElementById("target").innerHTML = `${fmt(METRIC.target)}<small> ${METRIC.unit}</small>`;
+  const lastDate = rows.length ? rows[rows.length - 1].date : null;
+  document.getElementById("sub").textContent = rows.length ? `${rows.length} runs · last run ${lastDate}` : "No runs yet.";
+
+  if (cur.length) {
+    const last = cur[cur.length - 1];
+    const best = Math.max(...cur.map(r => r.v));
+    document.getElementById("latest").innerHTML = `${fmt(last.v)}<small> ${METRIC.unit}</small>`;
+    document.getElementById("latestwhen").textContent = `latest · run ${last.run} · ${last.date}`;
+    document.getElementById("best").innerHTML = `${fmt(best)}<small> ${METRIC.unit}</small>`;
+    document.getElementById("chart").innerHTML = chart(cur);
+    bindTips();
+  }
+
+  document.getElementById("rows").innerHTML = rows.slice().reverse().map(r =>
+    `<tr><td>${esc(r.date)}</td><td>${esc(r.run)}</td><td>${fmt(r.v)}</td><td>${esc(r.metric_version)}</td><td class="note">${esc(r.note || "")}</td></tr>`).join("");
+}
+
+function chart(pts) {
+  const W = 680, H = 260, L = 48, R = 20, T = 20, B = 34;
+  const t0 = pts[0].d.getTime(), t1 = Math.max(pts[pts.length - 1].d.getTime(), t0 + 86400e3);
+  const raw = Math.max(...pts.map(p => p.v)) * 1.1 || 1;
+  let step = 1;
+  outer: for (let e = -3; e < 7; e++) for (const m of [1, 2, 2.5, 5]) { if (m * 10 ** e * 4 >= raw) { step = m * 10 ** e; break outer; } }
+  const y1 = step * 4;
+  const sx = t => L + (t - t0) / (t1 - t0) * (W - L - R);
+  const sy = v => H - B - v / y1 * (H - T - B);
+
+  let g = "";
+  for (let i = 0; i <= 4; i++) {
+    const v = step * i, y = sy(v);
+    g += `<line class="grid" x1="${L}" x2="${W - R}" y1="${y}" y2="${y}"/><text class="tick" x="${L - 6}" y="${y + 4}" text-anchor="end">${fmt(v)}</text>`;
+  }
+  // date ticks: at most ~6, on run dates
+  const every = Math.ceil(pts.length / 6);
+  pts.forEach((p, i) => {
+    if (i % every === 0 || i === pts.length - 1)
+      g += `<text class="tick" x="${sx(p.d)}" y="${H - 12}" text-anchor="middle">${p.date.slice(5)}</text>`;
+  });
+  const line = `<polyline class="series" points="${pts.map(p => `${sx(p.d)},${sy(p.v)}`).join(" ")}"/>`;
+  const dots = pts.map(p => {
+    const tip = esc(JSON.stringify({ t: `${p.date} · run ${p.run}`, v: `${fmt(p.v)} ${METRIC.unit}`, n: p.note || "" }));
+    return `<circle class="dot" cx="${sx(p.d)}" cy="${sy(p.v)}" r="4.5"/><circle class="hit" cx="${sx(p.d)}" cy="${sy(p.v)}" r="14" data-tip="${tip}"/>`;
+  }).join("");
+  const last = pts[pts.length - 1];
+  const label = `<text class="dlabel" x="${sx(last.d)}" y="${sy(last.v) - 12}" text-anchor="middle">${fmt(last.v)}</text>`;
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(METRIC.name)} by run date">${g}${line}${dots}${label}</svg>`;
+}
+
+function bindTips() {
+  const tip = document.getElementById("tip");
+  document.querySelectorAll(".hit").forEach(el => {
+    el.addEventListener("pointerenter", () => {
+      const d = JSON.parse(el.dataset.tip);
+      tip.innerHTML = `${esc(d.t)}<br><b>${esc(d.v)}</b>${d.n ? `<br><span style="color:var(--muted)">${esc(d.n)}</span>` : ""}`;
+      tip.style.display = "block";
+    });
+    el.addEventListener("pointermove", e => {
+      tip.style.left = Math.min(e.clientX + 12, innerWidth - tip.offsetWidth - 8) + "px";
+      tip.style.top = (e.clientY + 12) + "px";
+    });
+    el.addEventListener("pointerleave", () => tip.style.display = "none");
+  });
+}
+
+fetch("data.csv", { cache: "no-store" })
+  .then(r => r.ok ? r.text() : Promise.reject(r.status))
+  .then(t => render(parseCSV(t)))
+  .catch(() => { document.getElementById("sub").textContent = "Could not load data.csv."; });
+</script>
+</body>
+</html>
