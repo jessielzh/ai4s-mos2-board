@@ -112,10 +112,12 @@ function fmt(v, m) {
 const num = s => (s === undefined || s === "") ? null : Number(s);
 
 function render(all) {
-  const runs = all.filter(r => r.date).sort((a, b) => a.date.localeCompare(b.date) || a.run.localeCompare(b.run));
+  // runs without a growth date (historical runs, date not yet known) come first, in run-number order
+  const runs = all.filter(r => r.run).sort((a, b) => !b.date - !a.date || a.date.localeCompare(b.date) || a.run.localeCompare(b.run));
   const cur = runs.filter(r => r.metric_version === VERSION);
+  const dated = runs.filter(r => r.date);
   document.getElementById("sub").textContent = runs.length
-    ? `${runs.length} runs · last run ${runs[runs.length - 1].date} · metrics ${VERSION}` : "No runs yet.";
+    ? `${runs.length} runs${dated.length ? ` · last run ${dated[dated.length - 1].date}` : ""} · metrics ${VERSION}` : "No runs yet.";
 
   document.getElementById("panels").innerHTML = METRICS.map(m => {
     const pts = cur.map((r, x) => ({ x, r, v: num(r[m.key]) })).filter(p => p.v != null && !isNaN(p.v));
@@ -131,7 +133,7 @@ function render(all) {
   document.getElementById("defs").innerHTML = METRICS.map(m => `<dt>${esc(m.name)}</dt><dd>${esc(m.def)}</dd>`).join("");
   document.getElementById("thead").innerHTML = `<tr><th>Date</th><th>Run</th>${METRICS.map(m => `<th>${esc(m.name)}</th>`).join("")}<th>Metrics</th><th>Note</th></tr>`;
   document.getElementById("rows").innerHTML = runs.slice().reverse().map(r =>
-    `<tr><td>${esc(r.date)}</td><td>${esc(r.run)}</td>${METRICS.map(m => `<td>${fmt(num(r[m.key]), m)}</td>`).join("")}<td>${esc(r.metric_version)}</td><td class="note">${esc(r.note || "")}</td></tr>`).join("");
+    `<tr><td>${esc(r.date || "—")}</td><td>${esc(r.run)}</td>${METRICS.map(m => `<td>${fmt(num(r[m.key]), m)}</td>`).join("")}<td>${esc(r.metric_version)}</td><td class="note">${esc(r.note || "")}</td></tr>`).join("");
   bindTips();
 }
 
@@ -149,7 +151,7 @@ function chart(pts, runs, m) {
     const y = sy(step * i);
     g += `<line class="grid" x1="${L}" x2="${W - R}" y1="${y}" y2="${y}"/><text class="tick" x="${L - 6}" y="${y + 4}" text-anchor="end">${fmt(step * i, m)}</text>`;
   }
-  // x axis = runs in growth-date order; two runs on one day stay separate points
+  // x axis = runs in growth-date order (undated first, by run number); two runs on one day stay separate points
   const every = Math.ceil(runs.length / 8);
   runs.forEach((r, x) => {
     if (x % every === 0 || x === runs.length - 1)
@@ -157,7 +159,7 @@ function chart(pts, runs, m) {
   });
   const line = `<polyline class="series" points="${pts.map(p => `${sx(p.x)},${sy(p.v)}`).join(" ")}"/>`;
   const dots = pts.map(p => {
-    const tip = esc(JSON.stringify({ t: `${p.r.run} · ${p.r.date}`, v: `${m.name}: ${fmt(p.v, m)}${m.unit ? " " + m.unit : ""}`, n: p.r.note || "" }));
+    const tip = esc(JSON.stringify({ t: p.r.date ? `${p.r.run} · ${p.r.date}` : p.r.run, v: `${m.name}: ${fmt(p.v, m)}${m.unit ? " " + m.unit : ""}`, n: p.r.note || "" }));
     return `<circle class="dot" cx="${sx(p.x)}" cy="${sy(p.v)}" r="4.5"/><circle class="hit" cx="${sx(p.x)}" cy="${sy(p.v)}" r="14" data-tip="${tip}"/>`;
   }).join("");
   const last = pts[pts.length - 1];
